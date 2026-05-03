@@ -1,8 +1,8 @@
+import { Suspense } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { CATEGORIES, searchProducts, type OFFProduct } from "@/lib/off";
-import { FEATURED_PRODUCTS, filterByCategory } from "@/lib/featured";
 import SearchBar from "@/components/SearchBar";
 
 export const metadata: Metadata = {
@@ -21,24 +21,6 @@ export default async function HomePage({ searchParams }: Props) {
   const q = sp.q?.trim() ?? "";
   const category = sp.category ?? "all";
   const page = Math.max(1, Number(sp.page ?? 1) || 1);
-
-  // Strategy:
-  // - No query: filter the baked-in product snapshot locally. Instant.
-  // - With a query: go to OFF's live search. This covers the full
-  //   catalogue and is the only path that needs to wait on the network.
-  let data: Awaited<ReturnType<typeof searchProducts>>;
-  if (!q) {
-    const products = filterByCategory(FEATURED_PRODUCTS, category);
-    data = {
-      ok: true,
-      products,
-      count: products.length,
-      page: 1,
-      page_size: products.length,
-    };
-  } else {
-    data = await searchProducts({ q, category, page, pageSize: 24 });
-  }
 
   return (
     <div>
@@ -63,45 +45,121 @@ export default async function HomePage({ searchParams }: Props) {
       </section>
 
       <section className="max-w-6xl mx-auto px-5 pb-12">
-        <div className="flex items-baseline justify-between mb-4">
-          <h2 className="font-serif text-xl">
-            {q ? `Results for "${q}"` : "Popular right now"}
-            {category !== "all" && (
-              <span className="text-black/50"> · {category}</span>
-            )}
-          </h2>
-          <span className="text-sm text-black/50">
-            {data.count.toLocaleString()} products indexed
-          </span>
-        </div>
-
-        {data.products.length === 0 ? (
-          <div className="card p-8 text-center">
-            <p className="text-black/70">
-              {!data.ok
-                ? "The Open Food Facts catalogue is temporarily unreachable. Give it a minute and refresh."
-                : "Nothing matched. Try a broader term or a different category."}
-            </p>
-          </div>
-        ) : (
-          <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {data.products.map((p) => (
-              <li key={p.code}>
-                <ProductCard product={p} />
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <Pagination
-          page={page}
-          pageSize={data.page_size}
-          total={data.count}
-          q={q}
-          category={category}
-        />
+        <Suspense
+          key={`${q}|${category}|${page}`}
+          fallback={<ProductsFallback q={q} category={category} />}
+        >
+          <ProductsGrid q={q} category={category} page={page} />
+        </Suspense>
       </section>
     </div>
+  );
+}
+
+async function ProductsGrid({
+  q,
+  category,
+  page,
+}: {
+  q: string;
+  category: string;
+  page: number;
+}) {
+  const data = await searchProducts({ q, category, page, pageSize: 24 });
+
+  return (
+    <>
+      <div className="flex items-baseline justify-between mb-4">
+        <h2 className="font-serif text-xl">
+          {q ? `Results for "${q}"` : "Popular right now"}
+          {category !== "all" && (
+            <span className="text-black/50"> · {category}</span>
+          )}
+        </h2>
+        <span className="text-sm text-black/50">
+          {data.ok ? `${data.count.toLocaleString()} products indexed` : ""}
+        </span>
+      </div>
+
+      {data.products.length === 0 ? (
+        <div className="card p-8 text-center">
+          <p className="text-black/70">
+            {!data.ok
+              ? "The Open Food Facts catalogue is temporarily unreachable. Give it a minute and refresh."
+              : "Nothing matched. Try a broader term or a different category."}
+          </p>
+        </div>
+      ) : (
+        <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {data.products.map((p) => (
+            <li key={p.code}>
+              <ProductCard product={p} />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Pagination
+        page={page}
+        pageSize={data.page_size}
+        total={data.ok ? data.count : 0}
+        q={q}
+        category={category}
+      />
+    </>
+  );
+}
+
+function ProductsFallback({ q, category }: { q: string; category: string }) {
+  return (
+    <>
+      <div className="flex items-baseline justify-between mb-4">
+        <h2 className="font-serif text-xl inline-flex items-center gap-3">
+          {q ? `Searching "${q}"…` : "Loading products…"}
+          {category !== "all" && (
+            <span className="text-black/50">· {category}</span>
+          )}
+          <Spinner />
+        </h2>
+        <span className="text-sm text-black/50">fetching from Open Food Facts</span>
+      </div>
+      <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        {Array.from({ length: 12 }).map((_, i) => (
+          <li key={i} className="card p-3">
+            <div className="aspect-square rounded-lg bg-black/5 animate-pulse" />
+            <div className="mt-3 h-3 w-2/3 bg-black/5 rounded animate-pulse" />
+            <div className="mt-2 h-3 w-1/2 bg-black/5 rounded animate-pulse" />
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4 animate-spin text-moss"
+      aria-hidden="true"
+    >
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        stroke="currentColor"
+        strokeOpacity="0.25"
+        strokeWidth="3"
+        fill="none"
+      />
+      <path
+        d="M21 12a9 9 0 0 0-9-9"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+        fill="none"
+      />
+    </svg>
   );
 }
 

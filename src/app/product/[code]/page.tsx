@@ -3,21 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getProduct, type OFFProduct } from "@/lib/off";
-import { FEATURED_PRODUCTS } from "@/lib/featured";
 
 type Params = { params: Promise<{ code: string }> };
 
-// Check the baked snapshot first; fall back to a live OFF lookup only if
-// the barcode isn't already in our shipped data.
-async function resolveProduct(code: string): Promise<OFFProduct | null> {
-  const cached = FEATURED_PRODUCTS.find((p) => p.code === code);
-  if (cached) return cached;
-  return getProduct(code);
-}
-
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { code } = await params;
-  const product = await resolveProduct(code);
+  const product = await getProduct(code);
   if (!product) {
     return { title: "Product not found" };
   }
@@ -43,7 +34,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 
 export default async function ProductPage({ params }: Params) {
   const { code } = await params;
-  const product = await resolveProduct(code);
+  const product = await getProduct(code);
   if (!product) notFound();
 
   const name = product.product_name?.trim() || "Unnamed product";

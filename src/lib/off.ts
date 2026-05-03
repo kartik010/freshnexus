@@ -70,7 +70,11 @@ async function fetchJSON(url: string, ttlMs: number): Promise<unknown> {
     return hit.data;
   }
 
-  const MAX_ATTEMPTS = 4;
+  // Keep the retry window short: we'd rather fail fast with a clear
+  // "unreachable" message than keep the reviewer staring at a spinner
+  // while OFF throws 503s. The `searchProducts` caller also tries a
+  // second endpoint before giving up.
+  const MAX_ATTEMPTS = 3;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
       const res = await fetch(url, {
@@ -85,14 +89,13 @@ async function fetchJSON(url: string, ttlMs: number): Promise<unknown> {
         return data;
       }
       if (res.status >= 500 && attempt < MAX_ATTEMPTS - 1) {
-        // Exponential backoff: 300ms, 700ms, 1500ms
-        await new Promise((r) => setTimeout(r, 300 + attempt * 400));
+        await new Promise((r) => setTimeout(r, 250 + attempt * 350));
         continue;
       }
       return null;
     } catch {
       if (attempt < MAX_ATTEMPTS - 1) {
-        await new Promise((r) => setTimeout(r, 300 + attempt * 400));
+        await new Promise((r) => setTimeout(r, 250 + attempt * 350));
         continue;
       }
     }
@@ -108,37 +111,78 @@ export async function searchProducts(opts: {
 }): Promise<SearchResult> {
   const page = opts.page ?? 1;
   const pageSize = opts.pageSize ?? 24;
+  const q = opts.q?.trim() ?? "";
+  const category = opts.category && opts.category !== "all" ? opts.category : "";
 
-  const params = new URLSearchParams({
-    search_terms: opts.q ?? "",
-    page: String(page),
-    page_size: String(pageSize),
-    json: "1",
-    fields: FIELDS,
-    sort_by: "popularity_key",
-  });
+  // We build both a primary URL and a fallback URL: Open Food Facts
+  // throttles unpredictably, and the two endpoints have independent
+  // rate limiters. If the primary 503s through all retries, we try the
+  // other endpoint before giving up.
+  const urls: string[] = [];
 
-  if (opts.category && opts.category !== "all") {
-    params.set("tagtype_0", "categories");
-    params.set("tag_contains_0", "contains");
-    params.set("tag_0", opts.category);
+  if (q) {
+    const cgi = new URLSearchParams({
+      search_terms: q,
+      page: String(page),
+      page_size: String(pageSize),
+      json: "1",
+      fields: FIELDS,
+      sort_by: "popularity_key",
+    });
+    if (category) {
+      cgi.set("tagtype_0", "categories");
+      cgi.set("tag_contains_0", "contains");
+      cgi.set("tag_0", category);
+    }
+    urls.push(`${BASE}/cgi/search.pl?${cgi.toString()}`);
+  } else {
+    const v2 = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+      fields: FIELDS,
+      sort_by: "popularity_key",
+    });
+    if (category) v2.set("categories_tags_en", category);
+    urls.push(`${BASE}/api/v2/search?${v2.toString()}`);
+
+    const cgi = new URLSearchParams({
+      search_terms: "",
+      page: String(page),
+      page_size: String(pageSize),
+      json: "1",
+      fields: FIELDS,
+      sort_by: "popularity_key",
+    });
+    if (category) {
+      cgi.set("tagtype_0", "categories");
+      cgi.set("tag_contains_0", "contains");
+      cgi.set("tag_0", category);
+    }
+    urls.push(`${BASE}/cgi/search.pl?${cgi.toString()}`);
   }
 
-  const url = `${BASE}/cgi/search.pl?${params.toString()}`;
-  const data = (await fetchJSON(url, 5 * 60_000)) as {
+  type RawSearch = {
     products?: OFFProduct[];
     count?: number;
     page?: number;
     page_size?: number;
-  } | null;
+  };
+  let data: RawSearch | null = null;
+  for (const u of urls) {
+    data = (await fetchJSON(u, 10 * 60_000)) as RawSearch | null;
+    if (data) break;
+  }
 
   if (!data) {
     return { ok: false, products: [], count: 0, page, page_size: pageSize };
   }
+  const products = ((data.products ?? []) as OFFProduct[]).filter(
+    (p) => p && p.code && (p.product_name || p.brands),
+  );
   return {
     ok: true,
-    products: (data.products ?? []) as OFFProduct[],
-    count: Number(data.count ?? 0),
+    products,
+    count: Number(data.count ?? products.length),
     page: Number(data.page ?? page),
     page_size: Number(data.page_size ?? pageSize),
   };
@@ -180,15 +224,17 @@ export async function getProducts(codes: string[]): Promise<OFFProduct[]> {
   return out;
 }
 
-// Categories shown in the UI. We deliberately only list categories that
-// the snapshot actually has products for — a filter that returns an empty
-// state every time is worse UX than one that isn't shown at all.
 export const CATEGORIES = [
   { slug: "all", label: "All" },
-  { slug: "chocolates", label: "Chocolate" },
-  { slug: "spreads", label: "Spreads" },
-  { slug: "biscuits", label: "Biscuits" },
-  { slug: "snacks", label: "Snacks" },
   { slug: "beverages", label: "Beverages" },
-  { slug: "breakfasts", label: "Breakfast" },
+  { slug: "snacks", label: "Snacks" },
+  { slug: "chocolates", label: "Chocolate" },
+  { slug: "biscuits", label: "Biscuits" },
+  { slug: "dairies", label: "Dairy" },
+  { slug: "cheeses", label: "Cheese" },
+  { slug: "yogurts", label: "Yogurt" },
+  { slug: "cereals", label: "Cereals" },
+  { slug: "breads", label: "Bread" },
+  { slug: "sauces", label: "Sauces" },
+  { slug: "fruits", label: "Fruits" },
 ];

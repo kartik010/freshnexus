@@ -64,21 +64,20 @@ so every filter is shareable, bookmarkable, and crawlable.
 ### Data persistence & caching
 
 This is a read-mostly public site, so I deliberately avoided a database.
-Three layers handle persistence:
+Two layers handle data:
 
-- **Baked-in product snapshot.** The curated home feed lives as a plain
-  JSON file at `src/data/featured.json`, populated by
-  `node scripts/prefetch-featured.mjs`. The home page and category
-  filters render from this snapshot with zero runtime API calls — pages
-  paint instantly, survive Open Food Facts outages, and are trivially
-  cacheable by a CDN. Treat the JSON as build-time data; re-run the
-  script to refresh it.
 - **In-memory runtime cache.** `src/lib/off.ts` and `src/lib/fx.ts` each
   keep a small `Map<url, { data, at, ttl }>` so that live API calls
-  (search, uncached product detail, FX) are cheap on repeat hits. I
-  deliberately did not use Next.js's `fetch` cache because it also
-  caches non-OK responses, which locks the app into stale 503s whenever
-  OFF throttles.
+  (catalogue listings, product detail, FX) are cheap on repeat hits.
+  I deliberately did not use Next.js's `fetch` cache because it also
+  caches non-OK responses, which would lock the app into stale 503s
+  whenever Open Food Facts throttles.
+- **Streaming with Suspense.** The home page shell, hero and category
+  pills render synchronously from the server. The product grid itself
+  lives inside a `<Suspense>` boundary keyed on the current filters —
+  so clicking a category paints a skeleton loader immediately and
+  products stream in when OFF responds. The user never stares at a
+  blank page.
 - **URL is the source of truth for UI state.** No global store, no
   `localStorage`. Filters, pagination and search live in the query
   string, which makes every view bookmarkable and crawlable.
@@ -117,11 +116,6 @@ src/
   components/
     SearchBar.tsx            # the only client component
   lib/
-    off.ts                   # Open Food Facts wrapper
-    featured.ts              # snapshot loader + category matchers
-    fx.ts                    # Frankfurter wrapper
-  data/
-    featured.json            # pre-fetched product snapshot
-scripts/
-  prefetch-featured.mjs      # regenerates featured.json
+    off.ts                   # Open Food Facts wrapper + in-memory cache
+    fx.ts                    # Frankfurter (ECB) wrapper
 ```
