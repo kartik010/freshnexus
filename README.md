@@ -5,6 +5,9 @@ Live product data comes from [Open Food Facts](https://world.openfoodfacts.org),
 and the Market Insights page pulls ECB exchange rates via
 [Frankfurter](https://www.frankfurter.app).
 
+- **Live site:** https://assignment-ivory-iota.vercel.app
+- **Source:** https://github.com/kartik010/freshnexus
+
 ## Stack
 
 - Next.js 15 (App Router, React Server Components)
@@ -22,6 +25,7 @@ npm run dev
 Open http://localhost:3000.
 
 To produce a production build:
+
 
 ```bash
 npm run build
