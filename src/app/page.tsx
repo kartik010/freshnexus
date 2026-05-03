@@ -83,11 +83,22 @@ async function ProductsGrid({
 
       {data.products.length === 0 ? (
         <div className="card p-8 text-center">
-          <p className="text-black/70">
-            {!data.ok
-              ? "The Open Food Facts catalogue is temporarily unreachable. Give it a minute and refresh."
-              : "Nothing matched. Try a broader term or a different category."}
-          </p>
+          {!data.ok ? (
+            <>
+              <p className="text-black/80 font-medium">
+                Open Food Facts is rate-limiting us right now.
+              </p>
+              <p className="text-black/60 text-sm mt-1">
+                Their public API throttles heavily on the free tier. Try
+                again in 20–30 seconds — successful categories are cached
+                and will stay fast.
+              </p>
+            </>
+          ) : (
+            <p className="text-black/70">
+              Nothing matched. Try a broader term or a different category.
+            </p>
+          )}
         </div>
       ) : (
         <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">

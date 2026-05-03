@@ -135,6 +135,19 @@ export async function searchProducts(opts: {
       cgi.set("tag_0", category);
     }
     urls.push(`${BASE}/cgi/search.pl?${cgi.toString()}`);
+
+    // v2 fallback — even though it doesn't do full-text well, it's on a
+    // separate rate limiter and usually returns something when cgi is
+    // throttled. Better than a dead page.
+    const v2 = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+      fields: FIELDS,
+      sort_by: "popularity_key",
+    });
+    if (category) v2.set("categories_tags_en", category);
+    v2.set("search_terms", q);
+    urls.push(`${BASE}/api/v2/search?${v2.toString()}`);
   } else {
     const v2 = new URLSearchParams({
       page: String(page),
