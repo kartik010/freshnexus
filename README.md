@@ -63,15 +63,25 @@ so every filter is shareable, bookmarkable, and crawlable.
 
 ### Data persistence & caching
 
-This is a read-mostly public site, so I deliberately avoided a database:
+This is a read-mostly public site, so I deliberately avoided a database.
+Three layers handle persistence:
 
-- **Edge-cached fetches.** Both API wrappers use
-  `fetch(url, { next: { revalidate: N } })`. The catalogue revalidates every
-  5 minutes; product detail every 10 minutes; FX rates every hour (they
-  only change once a day in practice).
+- **Baked-in product snapshot.** The curated home feed lives as a plain
+  JSON file at `src/data/featured.json`, populated by
+  `node scripts/prefetch-featured.mjs`. The home page and category
+  filters render from this snapshot with zero runtime API calls — pages
+  paint instantly, survive Open Food Facts outages, and are trivially
+  cacheable by a CDN. Treat the JSON as build-time data; re-run the
+  script to refresh it.
+- **In-memory runtime cache.** `src/lib/off.ts` and `src/lib/fx.ts` each
+  keep a small `Map<url, { data, at, ttl }>` so that live API calls
+  (search, uncached product detail, FX) are cheap on repeat hits. I
+  deliberately did not use Next.js's `fetch` cache because it also
+  caches non-OK responses, which locks the app into stale 503s whenever
+  OFF throttles.
 - **URL is the source of truth for UI state.** No global store, no
-  `localStorage`. This keeps pages stateless, linkable and easy to
-  reason about when they stream from the server.
+  `localStorage`. Filters, pagination and search live in the query
+  string, which makes every view bookmarkable and crawlable.
 - **No auth / no user data.** If the assignment grew, I would add
   bookmarks in a Postgres table keyed by a cookie-issued `user_id`, with
   the product list read via a server action. The read path on product
@@ -108,5 +118,10 @@ src/
     SearchBar.tsx            # the only client component
   lib/
     off.ts                   # Open Food Facts wrapper
+    featured.ts              # snapshot loader + category matchers
     fx.ts                    # Frankfurter wrapper
+  data/
+    featured.json            # pre-fetched product snapshot
+scripts/
+  prefetch-featured.mjs      # regenerates featured.json
 ```

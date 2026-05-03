@@ -1,13 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { Metadata } from "next";
-import {
-  CATEGORIES,
-  getProducts,
-  searchProducts,
-  type OFFProduct,
-} from "@/lib/off";
-import { FEATURED_BARCODES } from "@/lib/featured";
+import { CATEGORIES, searchProducts, type OFFProduct } from "@/lib/off";
+import { FEATURED_PRODUCTS, filterByCategory } from "@/lib/featured";
 import SearchBar from "@/components/SearchBar";
 
 export const metadata: Metadata = {
@@ -27,27 +22,22 @@ export default async function HomePage({ searchParams }: Props) {
   const category = sp.category ?? "all";
   const page = Math.max(1, Number(sp.page ?? 1) || 1);
 
-  // Default landing view uses a curated barcode list fetched via the
-  // per-product endpoint — far more reliable than the generic search
-  // endpoint, which is aggressively rate-limited. A real query or category
-  // filter falls through to the live search.
+  // Strategy:
+  // - No query: filter the baked-in product snapshot locally. Instant.
+  // - With a query: go to OFF's live search. This covers the full
+  //   catalogue and is the only path that needs to wait on the network.
   let data: Awaited<ReturnType<typeof searchProducts>>;
-  if (!q && category === "all" && page === 1) {
-    const products = await getProducts(FEATURED_BARCODES);
+  if (!q) {
+    const products = filterByCategory(FEATURED_PRODUCTS, category);
     data = {
-      ok: products.length > 0,
+      ok: true,
       products,
       count: products.length,
       page: 1,
       page_size: products.length,
     };
   } else {
-    data = await searchProducts({
-      q: q || "popular",
-      category,
-      page,
-      pageSize: 24,
-    });
+    data = await searchProducts({ q, category, page, pageSize: 24 });
   }
 
   return (

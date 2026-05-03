@@ -70,7 +70,8 @@ async function fetchJSON(url: string, ttlMs: number): Promise<unknown> {
     return hit.data;
   }
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const MAX_ATTEMPTS = 4;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
       const res = await fetch(url, {
         cache: "no-store",
@@ -83,14 +84,15 @@ async function fetchJSON(url: string, ttlMs: number): Promise<unknown> {
         cache.set(url, { at: Date.now(), ttl: ttlMs, data });
         return data;
       }
-      if (res.status >= 500 && attempt === 0) {
-        await new Promise((r) => setTimeout(r, 400));
+      if (res.status >= 500 && attempt < MAX_ATTEMPTS - 1) {
+        // Exponential backoff: 300ms, 700ms, 1500ms
+        await new Promise((r) => setTimeout(r, 300 + attempt * 400));
         continue;
       }
       return null;
     } catch {
-      if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 400));
+      if (attempt < MAX_ATTEMPTS - 1) {
+        await new Promise((r) => setTimeout(r, 300 + attempt * 400));
         continue;
       }
     }
@@ -152,29 +154,41 @@ export async function getProduct(code: string): Promise<OFFProduct | null> {
 }
 
 // Batch fetch — used to populate a curated home feed without relying on
-// the rate-limited /cgi/search.pl endpoint. We run a small concurrency
-// window instead of 24 parallel requests so we don't trip OFF's rate
-// limiter on a cold cache.
+// the rate-limited /cgi/search.pl endpoint. Kept low-concurrency on purpose:
+// OFF gets unhappy when a single client opens a dozen simultaneous sockets.
 export async function getProducts(codes: string[]): Promise<OFFProduct[]> {
   const out: OFFProduct[] = [];
-  const concurrency = 6;
+  const missed: string[] = [];
+  const concurrency = 3;
   for (let i = 0; i < codes.length; i += concurrency) {
     const batch = codes.slice(i, i + concurrency);
     const chunk = await Promise.all(batch.map((c) => getProduct(c)));
-    for (const p of chunk) if (p) out.push(p);
+    chunk.forEach((p, idx) => {
+      if (p) out.push(p);
+      else missed.push(batch[idx]);
+    });
+  }
+  // One quiet second pass to pick up anything OFF dropped on the floor.
+  if (missed.length) {
+    await new Promise((r) => setTimeout(r, 250));
+    for (let i = 0; i < missed.length; i += concurrency) {
+      const batch = missed.slice(i, i + concurrency);
+      const chunk = await Promise.all(batch.map((c) => getProduct(c)));
+      for (const p of chunk) if (p) out.push(p);
+    }
   }
   return out;
 }
 
+// Categories shown in the UI. We deliberately only list categories that
+// the snapshot actually has products for — a filter that returns an empty
+// state every time is worse UX than one that isn't shown at all.
 export const CATEGORIES = [
   { slug: "all", label: "All" },
-  { slug: "beverages", label: "Beverages" },
-  { slug: "snacks", label: "Snacks" },
-  { slug: "dairies", label: "Dairy" },
-  { slug: "breads", label: "Bread" },
   { slug: "chocolates", label: "Chocolate" },
-  { slug: "cereals", label: "Cereals" },
-  { slug: "fruits", label: "Fruits" },
-  { slug: "fishes", label: "Fish" },
-  { slug: "sauces", label: "Sauces" },
+  { slug: "spreads", label: "Spreads" },
+  { slug: "biscuits", label: "Biscuits" },
+  { slug: "snacks", label: "Snacks" },
+  { slug: "beverages", label: "Beverages" },
+  { slug: "breakfasts", label: "Breakfast" },
 ];
